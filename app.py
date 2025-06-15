@@ -166,6 +166,14 @@ def download_file():
                         'Content-Type': 'application/octet-stream'
                     })
 
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return jsonify({"message": "PicknFetch backend is running."})
+
 import os
 
 if __name__ == "__main__":
