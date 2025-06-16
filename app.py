@@ -1,21 +1,15 @@
-from flask import Flask, request, jsonify, send_file, abort, Response
-from flask_cors import CORS, cross_origin
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import requests
-import io
 import struct
-import os
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
-
-@app.route("/")
-def home():
-    return jsonify({"message": "PicknFetch backend is running."})
+CORS(app)
 
 # Helper to parse central directory entries from ZIP EOCD remote fetch
 def parse_central_directory(data):
     files = []
-    signature = b'\x50\x4b\x01\x02'
+    signature = b'\x50\x4b\x01\x02'  # Central directory file header
     pos = 0
     while True:
         pos = data.find(signature, pos)
@@ -42,12 +36,12 @@ def parse_central_directory(data):
             break
     return files
 
+# Get byte range to fetch EOCD from remote ZIP
 def get_eocd_range(total_size):
     read_size = min(66000, total_size)
     return total_size - read_size, total_size - 1
 
-@app.route('/api/inspect', methods=['POST', 'OPTIONS'])
-@cross_origin()
+@app.route("/api/inspect", methods=["POST"])
 def inspect_zip():
     data = request.json
     url = data.get('url')
@@ -63,11 +57,13 @@ def inspect_zip():
     if user_agent:
         headers['User-Agent'] = user_agent
 
+    # Step 1: Get content length
     head_resp = requests.head(url, headers=headers)
     if head_resp.status_code != 200 or 'Content-Length' not in head_resp.headers:
         return jsonify({'error': 'Failed to get content length'}), 400
     total_size = int(head_resp.headers['Content-Length'])
 
+    # Step 2: Get EOCD
     start, end = get_eocd_range(total_size)
     headers['Range'] = f'bytes={start}-{end}'
     range_resp = requests.get(url, headers=headers)
@@ -75,14 +71,17 @@ def inspect_zip():
         return jsonify({'error': 'Failed to download EOCD range'}), 400
     data_bytes = range_resp.content
 
+    # Step 3: Find EOCD
     eocd_signature = b'\x50\x4b\x05\x06'
     eocd_pos = data_bytes.rfind(eocd_signature)
     if eocd_pos == -1:
         return jsonify({'error': 'EOCD not found in ZIP file'}), 400
 
+    # Step 4: Parse EOCD
     cd_size = struct.unpack('<I', data_bytes[eocd_pos+12:eocd_pos+16])[0]
     cd_offset = struct.unpack('<I', data_bytes[eocd_pos+16:eocd_pos+20])[0]
 
+    # Step 5: Fetch central directory
     cd_start = cd_offset
     cd_end = cd_offset + cd_size - 1
     headers['Range'] = f'bytes={cd_start}-{cd_end}'
@@ -91,65 +90,15 @@ def inspect_zip():
         return jsonify({'error': 'Failed to download central directory'}), 400
     cd_data = cd_resp.content
 
+    # Step 6: Parse directory
     files = parse_central_directory(cd_data)
     return jsonify({'files': files})
 
-@app.route('/api/download', methods=['POST', 'OPTIONS'])
-@cross_origin()
-def download_file():
-    data = request.json
-    print("Received download request:", data)
-    url = data.get('url')
-    filename = data.get('filename')
-    offset = data.get('offset')
-    comp_size = data.get('comp_size')
-    compression = data.get('compression')
-    cookies = data.get('cookies', '')
-    user_agent = data.get('userAgent', '')
-
-    if not all([url, filename, offset, comp_size]):
-        return jsonify({'error': 'Missing required parameters'}), 400
-
-    headers = {}
-    if cookies:
-        headers['Cookie'] = cookies
-    if user_agent:
-        headers['User-Agent'] = user_agent
-
-    range_start = offset
-    range_end = offset + comp_size + 100
-    headers['Range'] = f'bytes={range_start}-{range_end}'
-    resp = requests.get(url, headers=headers, stream=True)
-    if resp.status_code not in [200, 206]:
-        return jsonify({'error': 'Failed to download file data'}), 400
-
-    content = resp.raw.read(30)
-    if content[0:4] != b'\x50\x4b\x03\x04':
-        return jsonify({'error': 'Invalid local file header'}), 400
-    fname_len = struct.unpack('<H', content[26:28])[0]
-    extra_len = struct.unpack('<H', content[28:30])[0]
-
-    rest_header = resp.raw.read(fname_len + extra_len)
-
-    def generate():
-        yield content + rest_header
-        remaining = comp_size
-        while remaining > 0:
-            chunk_size = min(8192, remaining)
-            chunk = resp.raw.read(chunk_size)
-            if not chunk:
-                break
-            yield chunk
-            remaining -= len(chunk)
-
-    return Response(
-        generate(),
-        headers={
-            'Content-Disposition': f'attachment; filename="{filename}"',
-            'Content-Type': 'application/octet-stream'
-        }
-    )
+@app.route("/")
+def home():
+    return jsonify({"message": "PicknFetch backend is running."})
 
 if __name__ == "__main__":
+    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
