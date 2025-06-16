@@ -9,7 +9,7 @@ app = Flask(__name__)
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, origins=["https://frontend-one-sand.vercel.app/"])
+CORS(app)
 
 # Helper to parse central directory entries from ZIP EOCD remote fetch
 def parse_central_directory(data):
