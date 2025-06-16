@@ -98,6 +98,7 @@ def inspect_zip():
 @cross_origin()
 def download_file():
     data = request.json
+    print("Received download request:", data)
     url = data.get('url')
     filename = data.get('filename')
     offset = data.get('offset')
