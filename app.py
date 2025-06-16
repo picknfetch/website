@@ -1,16 +1,15 @@
 from flask import Flask, request, jsonify, send_file, abort, Response
+from flask_cors import CORS
 import requests
 import io
 import struct
 
 app = Flask(__name__)
 
-from flask import Flask
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
-
+CORS(app, origins=["https://frontend-one-sand.vercel.app/"])
 
 # Helper to parse central directory entries from ZIP EOCD remote fetch
 def parse_central_directory(data):
